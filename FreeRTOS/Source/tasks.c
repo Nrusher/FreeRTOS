@@ -112,7 +112,11 @@ configIDLE_TASK_NAME in FreeRTOSConfig.h. */
 	#define configIDLE_TASK_NAME "IDLE"
 #endif
 
+// 有两种寻找最高优先级的方法，一种是纯C的（configUSE_PORT_OPTIMISED_TASK_SELECTION = 0），不依赖硬件平台
+// 另外一种是经过优化的需要依赖特定的指令
 #if ( configUSE_PORT_OPTIMISED_TASK_SELECTION == 0 )
+
+	// 普通无优化的方法
 
 	/* If configUSE_PORT_OPTIMISED_TASK_SELECTION is 0 then task selection is
 	performed in a generic way that is not optimised to any particular
@@ -136,6 +140,7 @@ configIDLE_TASK_NAME in FreeRTOSConfig.h. */
 	UBaseType_t uxTopPriority = uxTopReadyPriority;														\
 																										\
 		/* Find the highest priority queue that contains ready tasks. */								\
+		// 这里为什么要判断呢？在优化方法里并没有判断递减uxTopPriority
 		while( listLIST_IS_EMPTY( &( pxReadyTasksLists[ uxTopPriority ] ) ) )							\
 		{																								\
 			configASSERT( uxTopPriority );																\
@@ -144,6 +149,7 @@ configIDLE_TASK_NAME in FreeRTOSConfig.h. */
 																										\
 		/* listGET_OWNER_OF_NEXT_ENTRY indexes through the list, so the tasks of						\
 		the	same priority get an equal share of the processor time. */									\
+		// 这里listGET_OWNER_OF_NEXT_ENTRY是通过index变量遍历链表的，因此每个拥有相同优先级的任务都会享有相同的运行时间
 		listGET_OWNER_OF_NEXT_ENTRY( pxCurrentTCB, &( pxReadyTasksLists[ uxTopPriority ] ) );			\
 		uxTopReadyPriority = uxTopPriority;																\
 	} /* taskSELECT_HIGHEST_PRIORITY_TASK */
@@ -158,11 +164,15 @@ configIDLE_TASK_NAME in FreeRTOSConfig.h. */
 
 #else /* configUSE_PORT_OPTIMISED_TASK_SELECTION */
 
+	// 经过特殊优化的方法，依赖硬件
+
 	/* If configUSE_PORT_OPTIMISED_TASK_SELECTION is 1 then task selection is
 	performed in a way that is tailored to the particular microcontroller
 	architecture being used. */
 
 	/* A port optimised version is provided.  Call the port defined macros. */
+	// 这里不在使用数值大小来表示最高优先级，而是使用每一位表示是否有该优先级的任务处于就绪态，对于Cortex-m3有32位，如
+	// 0000 0000 0000 0000 0000 0000 0000 0001 表示第0级有就绪态的任务
 	#define taskRECORD_READY_PRIORITY( uxPriority )	portRECORD_READY_PRIORITY( uxPriority, uxTopReadyPriority )
 
 	/*-----------------------------------------------------------*/
@@ -172,6 +182,7 @@ configIDLE_TASK_NAME in FreeRTOSConfig.h. */
 	UBaseType_t uxTopPriority;																		\
 																									\
 		/* Find the highest priority list that contains ready tasks. */								\
+		// 对于Cortex-m3 其会调用CLZ汇编指令（计算变量从高位开始连续0的个数），快速获取当前任务中的最高优先级
 		portGET_HIGHEST_PRIORITY( uxTopPriority, uxTopReadyPriority );								\
 		configASSERT( listCURRENT_LIST_LENGTH( &( pxReadyTasksLists[ uxTopPriority ] ) ) > 0 );		\
 		listGET_OWNER_OF_NEXT_ENTRY( pxCurrentTCB, &( pxReadyTasksLists[ uxTopPriority ] ) );		\
@@ -258,19 +269,26 @@ to its original value when it is released. */
  */
 typedef struct tskTaskControlBlock 			/* The old naming convention is used to prevent breaking kernel aware debuggers. */
 {
+	// 这里栈顶指针必须位于TCB第一项是为了便于上下文切换操作，详见xPortPendSVHandler。
 	volatile StackType_t	*pxTopOfStack;	/*< Points to the location of the last item placed on the tasks stack.  THIS MUST BE THE FIRST MEMBER OF THE TCB STRUCT. */
 
 	#if ( portUSING_MPU_WRAPPERS == 1 )
 		xMPU_SETTINGS	xMPUSettings;		/*< The MPU settings are defined as part of the port layer.  THIS MUST BE THE SECOND MEMBER OF THE TCB STRUCT. */
 	#endif
 
+	// 表示任务状态，不同的状态会挂接在不同的状态链表下
 	ListItem_t			xStateListItem;	/*< The list that the state list item of a task is reference from denotes the state of that task (Ready, Blocked, Suspended ). */
+	// 事件链表项，会挂接到不同事件链表下
 	ListItem_t			xEventListItem;		/*< Used to reference a task from an event list. */
+	// 任务优先级，数值越大优先级越高
 	UBaseType_t			uxPriority;			/*< The priority of the task.  0 is the lowest priority. */
+	// 指向堆栈起始位置，这只是单纯的一个分配空间的地址，可以用来检测堆栈是否溢出
 	StackType_t			*pxStack;			/*< Points to the start of the stack. */
+	// 任务名
 	char				pcTaskName[ configMAX_TASK_NAME_LEN ];/*< Descriptive name given to the task when created.  Facilitates debugging only. */ /*lint !e971 Unqualified char types are allowed for strings and single characters only. */
 
 	#if ( ( portSTACK_GROWTH > 0 ) || ( configRECORD_STACK_HIGH_ADDRESS == 1 ) )
+		// 指向栈尾，可以用来检测堆栈是否溢出 
 		StackType_t		*pxEndOfStack;		/*< Points to the highest valid address for the stack. */
 	#endif
 
@@ -284,6 +302,7 @@ typedef struct tskTaskControlBlock 			/* The old naming convention is used to pr
 	#endif
 
 	#if ( configUSE_MUTEXES == 1 )
+		// 任务优先级被临时提高时，保存任务原本的优先级
 		UBaseType_t		uxBasePriority;		/*< The priority last assigned to the task - used by the priority inheritance mechanism. */
 		UBaseType_t		uxMutexesHeld;
 	#endif
@@ -347,6 +366,9 @@ doing so breaks some kernel aware debuggers and debuggers that rely on removing
 the static qualifier. */
 // 按优先级储存绪任务的链表项
 PRIVILEGED_DATA static List_t pxReadyTasksLists[ configMAX_PRIORITIES ];/*< Prioritised ready tasks. */
+
+/* 两个延时链表一个是当前的延时任务链表，另一个是溢出延时任务的链表，通过切换两个链表来处理溢出问题，
+这两个链表的元素都是按延时时长的顺序排列的*/
 PRIVILEGED_DATA static List_t xDelayedTaskList1;						/*< Delayed tasks. */
 PRIVILEGED_DATA static List_t xDelayedTaskList2;						/*< Delayed tasks (two lists are used - one for delays that have overflowed the current tick count. */
 PRIVILEGED_DATA static List_t * volatile pxDelayedTaskList;				/*< Points to the delayed task list currently being used. */
@@ -1315,16 +1337,20 @@ static void prvAddNewTaskToReadyList( TCB_t *pxNewTCB )
 		configASSERT( pxPreviousWakeTime );
 		configASSERT( ( xTimeIncrement > 0U ) );
 		configASSERT( uxSchedulerSuspended == 0 );
-
+		
+		//挂起所有任务
 		vTaskSuspendAll();
 		{
 			/* Minor optimisation.  The tick count cannot change in this
 			block. */
+			// 读取当前的系统滴答值
 			const TickType_t xConstTickCount = xTickCount;
 
 			/* Generate the tick time at which the task wants to wake. */
+			// 计算任务下次苏醒值
 			xTimeToWake = *pxPreviousWakeTime + xTimeIncrement;
 
+			// 判断是否需要进行延时
 			if( xConstTickCount < *pxPreviousWakeTime )
 			{
 				/* The tick count has overflowed since this function was
@@ -1332,6 +1358,9 @@ static void prvAddNewTaskToReadyList( TCB_t *pxNewTCB )
 				actually delay is if the wake time has also	overflowed,
 				and the wake time is greater than the tick time.  When this
 				is the case it is as if neither time had overflowed. */
+				// 如果当前的系统滴答值小于上次任务苏醒的时间，说明系统滴答值已经发生了溢出
+
+				// 这里判断了下次苏醒值，是否是一个进行延时的合理的值
 				if( ( xTimeToWake < *pxPreviousWakeTime ) && ( xTimeToWake > xConstTickCount ) )
 				{
 					xShouldDelay = pdTRUE;
@@ -1357,6 +1386,7 @@ static void prvAddNewTaskToReadyList( TCB_t *pxNewTCB )
 			}
 
 			/* Update the wake time ready for the next call. */
+			// 更新苏醒时间
 			*pxPreviousWakeTime = xTimeToWake;
 
 			if( xShouldDelay != pdFALSE )
@@ -1365,6 +1395,7 @@ static void prvAddNewTaskToReadyList( TCB_t *pxNewTCB )
 
 				/* prvAddCurrentTaskToDelayedList() needs the block time, not
 				the time to wake, so subtract the current tick count. */
+				// 把当前的任务添加到延时链表中
 				prvAddCurrentTaskToDelayedList( xTimeToWake - xConstTickCount, pdFALSE );
 			}
 			else
@@ -1372,12 +1403,15 @@ static void prvAddNewTaskToReadyList( TCB_t *pxNewTCB )
 				mtCOVERAGE_TEST_MARKER();
 			}
 		}
+
+		// 恢复任务调度器
 		xAlreadyYielded = xTaskResumeAll();
 
 		/* Force a reschedule if xTaskResumeAll has not already done so, we may
 		have put ourselves to sleep. */
 		if( xAlreadyYielded == pdFALSE )
 		{
+			// 强制进行一次任务切换
 			portYIELD_WITHIN_API();
 		}
 		else
@@ -1601,6 +1635,7 @@ static void prvAddNewTaskToReadyList( TCB_t *pxNewTCB )
 		configASSERT( ( uxNewPriority < configMAX_PRIORITIES ) );
 
 		/* Ensure the new priority is valid. */
+		// 判断优先级的合法性
 		if( uxNewPriority >= ( UBaseType_t ) configMAX_PRIORITIES )
 		{
 			uxNewPriority = ( UBaseType_t ) configMAX_PRIORITIES - ( UBaseType_t ) 1U;
@@ -1614,10 +1649,12 @@ static void prvAddNewTaskToReadyList( TCB_t *pxNewTCB )
 		{
 			/* If null is passed in here then it is the priority of the calling
 			task that is being changed. */
+			// 获取TCB，null就是当前任务
 			pxTCB = prvGetTCBFromHandle( xTask );
 
 			traceTASK_PRIORITY_SET( pxTCB, uxNewPriority );
 
+			// 获取任务的当前优先级
 			#if ( configUSE_MUTEXES == 1 )
 			{
 				uxCurrentBasePriority = pxTCB->uxBasePriority;
@@ -1628,10 +1665,12 @@ static void prvAddNewTaskToReadyList( TCB_t *pxNewTCB )
 			}
 			#endif
 
+			
 			if( uxCurrentBasePriority != uxNewPriority )
 			{
 				/* The priority change may have readied a task of higher
 				priority than the calling task. */
+				// 设置的优先级比当前的优先级高，需要设优先级
 				if( uxNewPriority > uxCurrentBasePriority )
 				{
 					if( pxTCB != pxCurrentTCB )
@@ -1639,6 +1678,7 @@ static void prvAddNewTaskToReadyList( TCB_t *pxNewTCB )
 						/* The priority of a task other than the currently
 						running task is being raised.  Is the priority being
 						raised above that of the running task? */
+						// 待设置任务不在运行且设置的优先级大于等于当前运行任务的优先级，需要进行一次新的任务调度。
 						if( uxNewPriority >= pxCurrentTCB->uxPriority )
 						{
 							xYieldRequired = pdTRUE;
@@ -1869,6 +1909,7 @@ static void prvAddNewTaskToReadyList( TCB_t *pxNewTCB )
 		configASSERT( xTask );
 
 		/* Is the task being resumed actually in the suspended list? */
+		// 在xSuspendedTaskList链表中不一定代表它一定是被挂起的，有可能是无限延时阻塞或者在中断中被重新恢复了
 		if( listIS_CONTAINED_WITHIN( &xSuspendedTaskList, &( pxTCB->xStateListItem ) ) != pdFALSE )
 		{
 			/* Has the task already been resumed from within an ISR? */

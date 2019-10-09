@@ -176,9 +176,12 @@ StackType_t *pxPortInitialiseStack( StackType_t *pxTopOfStack, TaskFunction_t px
 {
 	/* Simulate the stack frame as it would be created by a context switch
 	interrupt. */
+	// 这里空出一个存储地址是为了符合MCU进出中断的方式
 	pxTopOfStack--; /* Offset added to account for the way the MCU uses the stack on entry/exit of interrupts. */
+	// 栈中寄存器xPSR被初始为0x01000000，其中bit24被置1，表示使用Thumb指令
 	*pxTopOfStack = portINITIAL_XPSR;	/* xPSR */
 	pxTopOfStack--;
+	// 这是将任务函数地址压入栈中程序PC(R15)，当
 	*pxTopOfStack = ( ( StackType_t ) pxCode ) & portSTART_ADDRESS_MASK;	/* PC */
 	pxTopOfStack--;
 	*pxTopOfStack = ( StackType_t ) prvTaskExitError;	/* LR */
@@ -383,19 +386,33 @@ __asm void xPortPendSVHandler( void )
 	extern pxCurrentTCB;
 	extern vTaskSwitchContext;
 
+	/*DMB
+	数据存储器隔离。DMB 指令保证： 仅当所有在它前面的存储器访问操作
+	都执行完毕后，才提交(commit)在它后面的存储器访问操作。
+
+	DSB
+	数据同步隔离。比 DMB 严格： 仅当所有在它前面的存储器访问操作
+	都执行完毕后，才执行在它后面的指令（亦即任何指令都要等待存储器访 问操作——译者注）
+
+	ISB
+	指令同步隔离。最严格：它会清洗流水线，以保证所有它前面的指令都执
+	行完毕之后，才执行它后面的指令。*/
+
 	// 字节对齐
 	PRESERVE8
 
-	mrs r0, psp
-	isb
+	// PendSV中断产生时，硬件自动将xPSR，PC(R15)，LR(R14)，R12，R3-R0使用PSP压入任务堆栈中，进入中断后硬件会强制使用MSP指针
 
-	ldr	r3, =pxCurrentTCB		/* Get the location of the current TCB. */
-	ldr	r2, [r3]
+	mrs r0, psp					// 保存进程堆栈指针到R0
+	isb						
 
-	stmdb r0!, {r4-r11}			/* Save the remaining registers. */
-	str r0, [r2]				/* Save the new top of stack into the first member of the TCB. */
+	ldr	r3, =pxCurrentTCB		// 读取当前TCB块的地址到R3
+	ldr	r2, [r3]				// 将当前任务栈顶地址放到R2中，这是为什么强调栈顶指针一定得是TCB块的第一个成员的原因
 
-	stmdb sp!, {r3, r14}
+	stmdb r0!, {r4-r11}			/* 将R4到R11通用寄存器的值压入栈保存 */
+	str r0, [r2]				/* Save the new top of stack into the first member of the TCB. 将R0的值写入以R2为地址的内存中，也就是保存当前的栈顶地址到TCB的第一个成员，也就是栈顶指针*/
+
+	stmdb sp!, {r3, r14}		// 将R3，R14临时压栈，这里的SP其实使用的是MSP，这里进行压栈保护的原因是bl指令会自动更改R14值用于返回
 
 	// 屏蔽configMAX_SYSCALL_INTERRUPT_PRIORITY以下优先级的中断
 	mov r0, #configMAX_SYSCALL_INTERRUPT_PRIORITY
@@ -403,19 +420,20 @@ __asm void xPortPendSVHandler( void )
 
 	dsb
 	isb
-	bl vTaskSwitchContext
+	bl vTaskSwitchContext		// 这里调用vTaskSwitchContext函数来获取下一个要执行任务控制块
 	
 	// 取消中断屏蔽
 	mov r0, #0
 	msr basepri, r0
-	ldmia sp!, {r3, r14}
 
-	ldr r1, [r3]
-	ldr r0, [r1]				/* The first item in pxCurrentTCB is the task top of stack. */
-	ldmia r0!, {r4-r11}			/* Pop the registers and the critical nesting count. */
-	msr psp, r0
+	ldmia sp!, {r3, r14}		// 将R3，R14出栈，这里R3相当于是pxCurrentTCB内存的值，所以此时R3值已经更新为下一个要执行的任务TCB地址了
+
+	ldr r1, [r3]				
+	ldr r0, [r1]				/* The first item in pxCurrentTCB is the task top of stack. 把新任务的栈顶指针放到R0里*/
+	ldmia r0!, {r4-r11}			/* Pop the registers and the critical nesting count.将新任务的R4-R11出栈 */
+	msr psp, r0					// 将新的栈顶地址放入到进程堆栈指针PSP
 	isb
-	bx r14
+	bx r14	//异常发生时,R14中保存异常返回标志,包括返回后进入线程模式还是处理器模式、使用PSP堆栈指针还是MSP堆栈指针，当调用 bx r14指令后，硬件会知道要从异常返回，然后出栈，这个时候堆栈指针PSP已经指向了新任务堆栈的正确位置，当新任务的运行地址被出栈到PC寄存器后，新的任务也会被执行。
 	nop
 }
 /*-----------------------------------------------------------*/
@@ -430,10 +448,12 @@ void xPortSysTickHandler( void )
 	vPortRaiseBASEPRI();
 	{
 		/* Increment the RTOS tick. */
+		// 这里并不是每次进入系统滴答中断都会进行上下文切换，只有有任务从阻塞状态退出或者在时间片轮询模式中有相同的优先级的任务，才会进行上下文切换。
 		if( xTaskIncrementTick() != pdFALSE )
 		{
 			/* A context switch is required.  Context switching is performed in
 			the PendSV interrupt.  Pend the PendSV interrupt. */
+			// 实现上下文切换的方法是触发一次PendSV异常，进入PendSV中断。
 			portNVIC_INT_CTRL_REG = portNVIC_PENDSVSET_BIT;
 		}
 	}

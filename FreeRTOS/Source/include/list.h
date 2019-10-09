@@ -136,9 +136,13 @@ use of FreeRTOS.*/
 /*
  * Definition of the only type of object that a list can contain.
  */
+// 这里如果使用configLIST_VOLATILE，其会被替换为volatile关键字，volatile关键字是让编译器不对该变量进行优化，所谓的优化可以理解为
+// 其在生成汇编时，若多次读取该变量时其可能会将变量值放入寄存器中以加快读取速度，而不是真正的读取，这使得当某个变量会快速变化时，
+// 优化后“读取”的值并不是变量真实的值。当使用volatile关键字时，其会强迫编译器每次使用该变量时都真正的对它进行一次读取。
 struct xLIST;
 struct xLIST_ITEM
 {
+	// 第一个和最后一个成员值当configUSE_LIST_DATA_INTEGRITY_CHECK_BYTES被使能的时候会被设定为一个固定值，用来检验一个列表项数据是否完整
 	listFIRST_LIST_ITEM_INTEGRITY_CHECK_VALUE			/*< Set to a known value if configUSE_LIST_DATA_INTEGRITY_CHECK_BYTES is set to 1. */
 	// 用来给链表排序的值
 	configLIST_VOLATILE TickType_t xItemValue;			/*< The value being listed.  In most cases this is used to sort the list in descending order. */
@@ -169,7 +173,7 @@ typedef struct xMINI_LIST_ITEM MiniListItem_t;
  */
 typedef struct xLIST
 {
-	// 这第一项有什么用？
+	// 
 	listFIRST_LIST_INTEGRITY_CHECK_VALUE				/*< Set to a known value if configUSE_LIST_DATA_INTEGRITY_CHECK_BYTES is set to 1. */
 	// 记录该链表里有多少成员
 	volatile UBaseType_t uxNumberOfItems;
