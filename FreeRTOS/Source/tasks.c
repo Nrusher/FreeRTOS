@@ -975,6 +975,7 @@ UBaseType_t x;
 	pxNewTCB->uxPriority = uxPriority;
 	#if ( configUSE_MUTEXES == 1 )
 	{
+		// 使用互斥量时uxBasePriority保存的才是真正的基础优先级，而uxPriority是任务当前的优先级，可能被临时调整。
 		pxNewTCB->uxBasePriority = uxPriority;
 		pxNewTCB->uxMutexesHeld = 0;
 	}
@@ -1657,6 +1658,7 @@ static void prvAddNewTaskToReadyList( TCB_t *pxNewTCB )
 			// 获取任务的当前优先级
 			#if ( configUSE_MUTEXES == 1 )
 			{
+				// 如果使用了互斥锁，那么uxPriority只是临时优先级，任务真正的优先级被春存储在uxBasePriority中
 				uxCurrentBasePriority = pxTCB->uxBasePriority;
 			}
 			#else
@@ -1670,9 +1672,10 @@ static void prvAddNewTaskToReadyList( TCB_t *pxNewTCB )
 			{
 				/* The priority change may have readied a task of higher
 				priority than the calling task. */
-				// 设置的优先级比当前的优先级高，需要设优先级
+				
 				if( uxNewPriority > uxCurrentBasePriority )
 				{
+					// 设置的优先级比当前任务的基础优先级高，可能需要进行任务调度
 					if( pxTCB != pxCurrentTCB )
 					{
 						/* The priority of a task other than the currently
@@ -1693,6 +1696,7 @@ static void prvAddNewTaskToReadyList( TCB_t *pxNewTCB )
 						/* The priority of the running task is being raised,
 						but the running task must already be the highest
 						priority task able to run so no yield is required. */
+						// 该任务已经运行了，其优先级已经是最高的了，设置的优先级比其现有的优先级还要高，那么还是该任务运行，不需要切换。
 					}
 				}
 				else if( pxTCB == pxCurrentTCB )
@@ -1700,6 +1704,7 @@ static void prvAddNewTaskToReadyList( TCB_t *pxNewTCB )
 					/* Setting the priority of the running task down means
 					there may now be another task of higher priority that
 					is ready to execute. */
+					// 设置优先级小于等于当前优先级，且设置任务就是当前任务，肯定需要一次任务切换，寻找跟高优先级的任务
 					xYieldRequired = pdTRUE;
 				}
 				else
@@ -1707,17 +1712,20 @@ static void prvAddNewTaskToReadyList( TCB_t *pxNewTCB )
 					/* Setting the priority of any other task down does not
 					require a yield as the running task must be above the
 					new priority of the task being modified. */
+					// 设置优先级小于等于当前优先级，且待设置优先级任务不是当前任务，其肯定依然不会得到运行
 				}
 
 				/* Remember the ready list the task might be referenced from
 				before its uxPriority member is changed so the
 				taskRESET_READY_PRIORITY() macro can function correctly. */
+				// 获取任务当前的优先级
 				uxPriorityUsedOnEntry = pxTCB->uxPriority;
 
 				#if ( configUSE_MUTEXES == 1 )
 				{
 					/* Only change the priority being used if the task is not
 					currently using an inherited priority. */
+					// 使用互斥量时，任务只能在没有临时提升优先级的情况下修改优先级。
 					if( pxTCB->uxBasePriority == pxTCB->uxPriority )
 					{
 						pxTCB->uxPriority = uxNewPriority;
@@ -1728,6 +1736,7 @@ static void prvAddNewTaskToReadyList( TCB_t *pxNewTCB )
 					}
 
 					/* The base priority gets set whatever. */
+					// 同时惯性基础优先级
 					pxTCB->uxBasePriority = uxNewPriority;
 				}
 				#else
@@ -1738,6 +1747,7 @@ static void prvAddNewTaskToReadyList( TCB_t *pxNewTCB )
 
 				/* Only reset the event list item value if the value is not
 				being used for anything else. */
+				// 只有当任务不在事件链表中时才会根据优先级设置xEventListItem成员的数值
 				if( ( listGET_LIST_ITEM_VALUE( &( pxTCB->xEventListItem ) ) & taskEVENT_LIST_ITEM_VALUE_IN_USE ) == 0UL )
 				{
 					listSET_LIST_ITEM_VALUE( &( pxTCB->xEventListItem ), ( ( TickType_t ) configMAX_PRIORITIES - ( TickType_t ) uxNewPriority ) ); /*lint !e961 MISRA exception as the casts are only redundant for some ports. */
@@ -1751,6 +1761,7 @@ static void prvAddNewTaskToReadyList( TCB_t *pxNewTCB )
 				nothing more than change its priority variable. However, if
 				the task is in a ready list it needs to be removed and placed
 				in the list appropriate to its new priority. */
+				// 如果该任务在就绪表中，由于优先级改变，需要调整一下它在就绪表中的位置
 				if( listIS_CONTAINED_WITHIN( &( pxReadyTasksLists[ uxPriorityUsedOnEntry ] ), &( pxTCB->xStateListItem ) ) != pdFALSE )
 				{
 					/* The task is currently in its ready list - remove before
@@ -1785,6 +1796,7 @@ static void prvAddNewTaskToReadyList( TCB_t *pxNewTCB )
 
 				/* Remove compiler warning about unused variables when the port
 				optimised task selection is not being used. */
+				// 移除编译器警告
 				( void ) uxPriorityUsedOnEntry;
 			}
 		}
@@ -2339,6 +2351,7 @@ BaseType_t xAlreadyYielded = pdFALSE;
 				not	slip, and that any delayed tasks are resumed at the correct
 				time. */
 				{
+					// 补全漏掉的systicks
 					UBaseType_t uxPendedCounts = uxPendedTicks; /* Non-volatile copy. */
 
 					if( uxPendedCounts > ( UBaseType_t ) 0U )
@@ -2785,12 +2798,15 @@ BaseType_t xSwitchRequired = pdFALSE;
 	{
 		/* Minor optimisation.  The tick count cannot change in this
 		block. */
+		// 这是在任务调度器没有被挂起的情况下执行的操作
+
 		const TickType_t xConstTickCount = xTickCount + ( TickType_t ) 1;
 
 		/* Increment the RTOS tick, switching the delayed and overflowed
 		delayed lists if it wraps to 0. */
 		xTickCount = xConstTickCount;
 
+		// 判断systick是否发生溢出
 		if( xConstTickCount == ( TickType_t ) 0U ) /*lint !e774 'if' does not always evaluate to false as it is looking for an overflow. */
 		{
 			taskSWITCH_DELAYED_LISTS();
@@ -2804,6 +2820,7 @@ BaseType_t xSwitchRequired = pdFALSE;
 		the	queue in the order of their wake time - meaning once one task
 		has been found whose block time has not expired there is no need to
 		look any further down the list. */
+		// 判断是否到达下一个任务解除阻塞的时间，这里针对的阻塞任务主要针对的是延时产生的阻塞。
 		if( xConstTickCount >= xNextTaskUnblockTime )
 		{
 			for( ;; )
@@ -2815,6 +2832,7 @@ BaseType_t xSwitchRequired = pdFALSE;
 					unlikely that the
 					if( xTickCount >= xNextTaskUnblockTime ) test will pass
 					next time through. */
+					// 如果任务延时链表已经空了，把下次解除阻塞时间设为最大值portMAX_DELAY
 					xNextTaskUnblockTime = portMAX_DELAY; /*lint !e961 MISRA exception as the casts are only redundant for some ports. */
 					break;
 				}
@@ -2824,9 +2842,11 @@ BaseType_t xSwitchRequired = pdFALSE;
 					item at the head of the delayed list.  This is the time
 					at which the task at the head of the delayed list must
 					be removed from the Blocked state. */
+					// 取延时任务链表的首个链表项，延时任务链表是按解锁时间排序的，所以如果要解除阻塞，首个链表项肯定是需要解除阻塞的那个任务
 					pxTCB = listGET_OWNER_OF_HEAD_ENTRY( pxDelayedTaskList ); /*lint !e9079 void * is used as this macro is used with timers and co-routines too.  Alignment is known to be fine as the type of the pointer stored and retrieved is the same. */
 					xItemValue = listGET_LIST_ITEM_VALUE( &( pxTCB->xStateListItem ) );
 
+					// 判断这个任务是否需要解除阻塞
 					if( xConstTickCount < xItemValue )
 					{
 						/* It is not time to unblock this item yet, but the
@@ -2834,6 +2854,7 @@ BaseType_t xSwitchRequired = pdFALSE;
 						of the blocked list must be removed from the Blocked
 						state -	so record the item value in
 						xNextTaskUnblockTime. */
+						// 如果任务延时链表中的第一个任务不需要解除阻塞，那么将这个值作为下一次解锁时间，并跳出解除阻塞的过程
 						xNextTaskUnblockTime = xItemValue;
 						break; /*lint !e9011 Code structure here is deedmed easier to understand with multiple breaks. */
 					}
@@ -2842,11 +2863,15 @@ BaseType_t xSwitchRequired = pdFALSE;
 						mtCOVERAGE_TEST_MARKER();
 					}
 
+
+					// 以下是解除阻塞的具体过程
 					/* It is time to remove the item from the Blocked state. */
+					// 将任务移出任务延时链表
 					( void ) uxListRemove( &( pxTCB->xStateListItem ) );
 
 					/* Is the task waiting on an event also?  If so remove
 					it from the event list. */
+					// 如果该任务还被一个事件阻塞，也就是已经超时了，同时把任务从事件链表中移除
 					if( listLIST_ITEM_CONTAINER( &( pxTCB->xEventListItem ) ) != NULL )
 					{
 						( void ) uxListRemove( &( pxTCB->xEventListItem ) );
@@ -2858,10 +2883,12 @@ BaseType_t xSwitchRequired = pdFALSE;
 
 					/* Place the unblocked task into the appropriate ready
 					list. */
+					// 把这个任务添加到就绪链表中
 					prvAddTaskToReadyList( pxTCB );
 
 					/* A task being unblocked cannot cause an immediate
 					context switch if preemption is turned off. */
+					// 如果使用了抢占式，且解除阻塞任务的优先级高于当前运行的任务时，请求一次切换
 					#if (  configUSE_PREEMPTION == 1 )
 					{
 						/* Preemption is on, but a context switch should
@@ -2885,6 +2912,7 @@ BaseType_t xSwitchRequired = pdFALSE;
 		/* Tasks of equal priority to the currently running task will share
 		processing time (time slice) if preemption is on, and the application
 		writer has not explicitly turned time slicing off. */
+		// 如果使用Pre-emptive Scheduling (with Time Slicing)且当前任务优先级下不止一个任务，则请求一次上下文切换，切换时间片
 		#if ( ( configUSE_PREEMPTION == 1 ) && ( configUSE_TIME_SLICING == 1 ) )
 		{
 			if( listCURRENT_LIST_LENGTH( &( pxReadyTasksLists[ pxCurrentTCB->uxPriority ] ) ) > ( UBaseType_t ) 1 )
@@ -2904,6 +2932,7 @@ BaseType_t xSwitchRequired = pdFALSE;
 			count is being unwound (when the scheduler is being unlocked). */
 			if( uxPendedTicks == ( UBaseType_t ) 0U )
 			{
+				// 在任务调度器没有被挂起，且没有漏掉systick的情况下才会调用vApplicationTickHook，也就是xTaskResumeAll()补全systick值时是不会调用这个函数的，补全时，真实事件并没有经过1个systick，且任务调度器挂起时vApplicationTickHook()也是被正常调用的，不需要再补上。
 				vApplicationTickHook();
 			}
 			else
@@ -2915,10 +2944,12 @@ BaseType_t xSwitchRequired = pdFALSE;
 	}
 	else
 	{
+		// 在任务调度器被挂起时，记录挂起期间漏掉的systick，用于在xTaskResumeAll()恢复时补齐这些漏掉的systick值
 		++uxPendedTicks;
 
 		/* The tick hook gets called at regular intervals, even if the
 		scheduler is locked. */
+		// 在任务调度器挂起期间也保证vApplicationTickHook()被正常调用
 		#if ( configUSE_TICK_HOOK == 1 )
 		{
 			vApplicationTickHook();
@@ -2928,6 +2959,7 @@ BaseType_t xSwitchRequired = pdFALSE;
 
 	#if ( configUSE_PREEMPTION == 1 )
 	{
+		// xYieldPending这个变量相当于是提供一个可以手动储发切换的接口（暂时理解）
 		if( xYieldPending != pdFALSE )
 		{
 			xSwitchRequired = pdTRUE;
@@ -2939,6 +2971,7 @@ BaseType_t xSwitchRequired = pdFALSE;
 	}
 	#endif /* configUSE_PREEMPTION */
 
+	// 返回xSwitchRequired，如果xSwitchRequired = pdTRUE那么会触发PendSV进行一次上下文切换
 	return xSwitchRequired;
 }
 /*-----------------------------------------------------------*/

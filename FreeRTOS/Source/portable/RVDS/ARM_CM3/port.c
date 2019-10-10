@@ -181,11 +181,14 @@ StackType_t *pxPortInitialiseStack( StackType_t *pxTopOfStack, TaskFunction_t px
 	// 栈中寄存器xPSR被初始为0x01000000，其中bit24被置1，表示使用Thumb指令
 	*pxTopOfStack = portINITIAL_XPSR;	/* xPSR */
 	pxTopOfStack--;
-	// 这是将任务函数地址压入栈中程序PC(R15)，当
+	// 这是将任务函数地址压入栈中程序PC(R15)，当该第一次切换任务时，硬件的PC指针将指向该函数，也就是会执行这个任务。
+	// & portSTART_ADDRESS_MASK是保证地址对齐
 	*pxTopOfStack = ( ( StackType_t ) pxCode ) & portSTART_ADDRESS_MASK;	/* PC */
 	pxTopOfStack--;
+	// 正常任务是死循环，不会使用LR进行返回，这里相当于错误处理。
 	*pxTopOfStack = ( StackType_t ) prvTaskExitError;	/* LR */
 
+	// 跳过R12，R3，R2，R1不用初始化
 	pxTopOfStack -= 5;	/* R12, R3, R2 and R1. */
 	*pxTopOfStack = ( StackType_t ) pvParameters;	/* R0 */
 	pxTopOfStack -= 8;	/* R11, R10, R9, R8, R7, R6, R5 and R4. */
