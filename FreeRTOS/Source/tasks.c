@@ -1696,7 +1696,7 @@ static void prvAddNewTaskToReadyList( TCB_t *pxNewTCB )
 						/* The priority of the running task is being raised,
 						but the running task must already be the highest
 						priority task able to run so no yield is required. */
-						// 该任务已经运行了，其优先级已经是最高的了，设置的优先级比其现有的优先级还要高，那么还是该任务运行，不需要切换。
+						// 该任务已�����运行了，其优先级已经是最高的了，设置的优先级比其现有的优先级还要高，那么还是该任务运行，不需要切换。
 					}
 				}
 				else if( pxTCB == pxCurrentTCB )
@@ -3088,7 +3088,7 @@ BaseType_t xSwitchRequired = pdFALSE;
 
 #endif /* configUSE_APPLICATION_TASK_TAG */
 /*-----------------------------------------------------------*/
-
+// 寻找一个优先级最高的任务运行
 void vTaskSwitchContext( void )
 {
 	if( uxSchedulerSuspended != ( UBaseType_t ) pdFALSE )
@@ -3235,7 +3235,7 @@ void vTaskPlaceOnUnorderedEventList( List_t * pxEventList, const TickType_t xIte
 
 #endif /* configUSE_TIMERS */
 /*-----------------------------------------------------------*/
-
+// 将任务从事件链表中移除
 BaseType_t xTaskRemoveFromEventList( const List_t * const pxEventList )
 {
 TCB_t *pxUnblockedTCB;
@@ -3255,11 +3255,14 @@ BaseType_t xReturn;
 	This function assumes that a check has already been made to ensure that
 	pxEventList is not empty. */
 	pxUnblockedTCB = listGET_OWNER_OF_HEAD_ENTRY( pxEventList ); /*lint !e9079 void * is used as this macro is used with timers and co-routines too.  Alignment is known to be fine as the type of the pointer stored and retrieved is the same. */
+
+	// 从事件链表中移除
 	configASSERT( pxUnblockedTCB );
 	( void ) uxListRemove( &( pxUnblockedTCB->xEventListItem ) );
 
 	if( uxSchedulerSuspended == ( UBaseType_t ) pdFALSE )
 	{
+		// 任务调度器没被挂起，从当前的任务状态链表移到就绪链表中
 		( void ) uxListRemove( &( pxUnblockedTCB->xStateListItem ) );
 		prvAddTaskToReadyList( pxUnblockedTCB );
 
@@ -3281,9 +3284,11 @@ BaseType_t xReturn;
 	{
 		/* The delayed and ready lists cannot be accessed, so hold this task
 		pending until the scheduler is resumed. */
+		// 如果任务调度器挂起，将事件成员放到挂起就绪链表中
 		vListInsertEnd( &( xPendingReadyList ), &( pxUnblockedTCB->xEventListItem ) );
 	}
 
+	// 如果优先级比当前任务高，请求一次调度
 	if( pxUnblockedTCB->uxPriority > pxCurrentTCB->uxPriority )
 	{
 		/* Return true if the task removed from the event list has a higher
@@ -3476,6 +3481,7 @@ void vTaskMissedYield( void )
  * void prvIdleTask( void *pvParameters );
  *
  */
+// 空闲任务
 static portTASK_FUNCTION( prvIdleTask, pvParameters )
 {
 	/* Stop warnings. */
@@ -3493,6 +3499,7 @@ static portTASK_FUNCTION( prvIdleTask, pvParameters )
 	{
 		/* See if any tasks have deleted themselves - if so then the idle task
 		is responsible for freeing the deleted task's TCB and stack. */
+		// 检查是不是有任务自己删除了自己，由空闲任务对其内存等进行回收和处理
 		prvCheckTasksWaitingTermination();
 
 		#if ( configUSE_PREEMPTION == 0 )
@@ -3536,6 +3543,7 @@ static portTASK_FUNCTION( prvIdleTask, pvParameters )
 			without the overhead of a separate task.
 			NOTE: vApplicationIdleHook() MUST NOT, UNDER ANY CIRCUMSTANCES,
 			CALL A FUNCTION THAT MIGHT BLOCK. */
+			// 调用一下钩子函数
 			vApplicationIdleHook();
 		}
 		#endif /* configUSE_IDLE_HOOK */
@@ -3544,6 +3552,7 @@ static portTASK_FUNCTION( prvIdleTask, pvParameters )
 		to 1.  This is to ensure portSUPPRESS_TICKS_AND_SLEEP() is called when
 		user defined low power mode	implementations require
 		configUSE_TICKLESS_IDLE to be set to a value other than 1. */
+		// WAIT:低功耗模式暂时不管
 		#if ( configUSE_TICKLESS_IDLE != 0 )
 		{
 		TickType_t xExpectedIdleTime;
@@ -4021,7 +4030,7 @@ static void prvCheckTasksWaitingTermination( void )
 
 #endif /* INCLUDE_vTaskDelete */
 /*-----------------------------------------------------------*/
-
+// 计算下一次有解除任务阻塞的时间
 static void prvResetNextTaskUnblockTime( void )
 {
 TCB_t *pxTCB;
@@ -4032,10 +4041,13 @@ TCB_t *pxTCB;
 		the maximum possible value so it is	extremely unlikely that the
 		if( xTickCount >= xNextTaskUnblockTime ) test will pass until
 		there is an item in the delayed list. */
+		// 当前延时链表是空的，代表在当前systick未溢出的时段里，不会有任务需要解锁。
 		xNextTaskUnblockTime = portMAX_DELAY;
 	}
 	else
 	{
+		// 如果当前任务延时链表不为空，由于任务延时链表中的任务是按解除阻塞时间升序排列的，那么取当前任务延时链表的第一个任务的解除阻塞的时间作为下次进行解除阻塞的时间。
+
 		/* The new current delayed list is not empty, get the value of
 		the item at the head of the delayed list.  This is the time at
 		which the task at the head of the delayed list should be removed
@@ -4707,7 +4719,7 @@ TickType_t uxReturn;
 /*-----------------------------------------------------------*/
 
 #if( configUSE_TASK_NOTIFICATIONS == 1 )
-
+	// 读取通知值，主要是用于二值信号量和计数信号量
 	uint32_t ulTaskNotifyTake( BaseType_t xClearCountOnExit, TickType_t xTicksToWait )
 	{
 	uint32_t ulReturn;
@@ -4715,11 +4727,15 @@ TickType_t uxReturn;
 		taskENTER_CRITICAL();
 		{
 			/* Only block if the notification count is not already non-zero. */
+			// 只有当ulNotifiedValue为零时任务才会阻塞
 			if( pxCurrentTCB->ulNotifiedValue == 0UL )
 			{
 				/* Mark this task as waiting for a notification. */
+				// 表示该任务还处于阻塞状态，等待通知
 				pxCurrentTCB->ucNotifyState = taskWAITING_NOTIFICATION;
 
+				// 超时时间大于零，将链表加入阻塞链表中
+				// PROBLEM: 在超时时间内任务通知到达，任务如何解除阻塞呢？
 				if( xTicksToWait > ( TickType_t ) 0 )
 				{
 					prvAddCurrentTaskToDelayedList( xTicksToWait, pdTRUE );
@@ -4729,6 +4745,7 @@ TickType_t uxReturn;
 					section (some will yield immediately, others wait until the
 					critical section exits) - but it is not something that
 					application code should ever do. */
+					// 直接触发任务切换
 					portYIELD_WITHIN_API();
 				}
 				else
@@ -4743,8 +4760,12 @@ TickType_t uxReturn;
 		}
 		taskEXIT_CRITICAL();
 
+		// 程序执行到此，要么任务接收到了通知，要么发生了超时
+
 		taskENTER_CRITICAL();
 		{
+			// 对通知值处理
+
 			traceTASK_NOTIFY_TAKE();
 			ulReturn = pxCurrentTCB->ulNotifiedValue;
 
@@ -4752,10 +4773,12 @@ TickType_t uxReturn;
 			{
 				if( xClearCountOnExit != pdFALSE )
 				{
+					// 直接清零ulNotifiedValue
 					pxCurrentTCB->ulNotifiedValue = 0UL;
 				}
 				else
 				{
+					// ulNotifiedValue值减一
 					pxCurrentTCB->ulNotifiedValue = ulReturn - ( uint32_t ) 1;
 				}
 			}
@@ -4768,6 +4791,7 @@ TickType_t uxReturn;
 		}
 		taskEXIT_CRITICAL();
 
+		// 返回ulNotifiedValue
 		return ulReturn;
 	}
 
@@ -4775,7 +4799,7 @@ TickType_t uxReturn;
 /*-----------------------------------------------------------*/
 
 #if( configUSE_TASK_NOTIFICATIONS == 1 )
-
+	// 等待通知
 	BaseType_t xTaskNotifyWait( uint32_t ulBitsToClearOnEntry, uint32_t ulBitsToClearOnExit, uint32_t *pulNotificationValue, TickType_t xTicksToWait )
 	{
 	BaseType_t xReturn;
@@ -4783,16 +4807,21 @@ TickType_t uxReturn;
 		taskENTER_CRITICAL();
 		{
 			/* Only block if a notification is not already pending. */
+			// 当任务通知状态不为已接收到通知时，将任务加入任务延时链表中进行阻塞
 			if( pxCurrentTCB->ucNotifyState != taskNOTIFICATION_RECEIVED )
 			{
 				/* Clear bits in the task's notification value as bits may get
 				set	by the notifying task or interrupt.  This can be used to
 				clear the value to zero. */
+				// 在处理前清除某些位，相当于把某些位屏蔽了，
+				// PROBLEM: 为什么要进入的时候清除某些位呢？有什么应用场景？
 				pxCurrentTCB->ulNotifiedValue &= ~ulBitsToClearOnEntry;
 
 				/* Mark this task as waiting for a notification. */
+				// 将任务通知状态设置为等待通知状态
 				pxCurrentTCB->ucNotifyState = taskWAITING_NOTIFICATION;
 
+				// 如果等待的时间大于0，对这个任务进行阻塞
 				if( xTicksToWait > ( TickType_t ) 0 )
 				{
 					prvAddCurrentTaskToDelayedList( xTicksToWait, pdTRUE );
@@ -4802,6 +4831,7 @@ TickType_t uxReturn;
 					section (some will yield immediately, others wait until the
 					critical section exits) - but it is not something that
 					application code should ever do. */
+					// 触发中断直接进行一次任务切换
 					portYIELD_WITHIN_API();
 				}
 				else
@@ -4819,7 +4849,8 @@ TickType_t uxReturn;
 		taskENTER_CRITICAL();
 		{
 			traceTASK_NOTIFY_WAIT();
-
+			// 如果可以运行到这，说明是任务接收到通知了，或者超时
+			// 获取原始的ulNotifiedValue值
 			if( pulNotificationValue != NULL )
 			{
 				/* Output the current notification value, which may or may not
@@ -4840,6 +4871,7 @@ TickType_t uxReturn;
 			{
 				/* A notification was already pending or a notification was
 				received while the task was waiting. */
+				// 返回前清空某些位
 				pxCurrentTCB->ulNotifiedValue &= ~ulBitsToClearOnExit;
 				xReturn = pdTRUE;
 			}
@@ -4861,36 +4893,43 @@ TickType_t uxReturn;
 	TCB_t * pxTCB;
 	BaseType_t xReturn = pdPASS;
 	uint8_t ucOriginalNotifyState;
-
 		configASSERT( xTaskToNotify );
 		pxTCB = xTaskToNotify;
 
 		taskENTER_CRITICAL();
 		{
+			// pulPreviousNotificationValue不为NULL则使用该地址存储，先前的task的ulNotifiedValue值
 			if( pulPreviousNotificationValue != NULL )
 			{
 				*pulPreviousNotificationValue = pxTCB->ulNotifiedValue;
 			}
 
+			// 保存原本的任务通知状态
 			ucOriginalNotifyState = pxTCB->ucNotifyState;
 
+			// 将任务通知状态标为已接收到
 			pxTCB->ucNotifyState = taskNOTIFICATION_RECEIVED;
 
+			// 根据不同的使用方法改变ulNotifiedValue的值
 			switch( eAction )
 			{
 				case eSetBits	:
+					// 置位某些位的值
 					pxTCB->ulNotifiedValue |= ulValue;
 					break;
 
 				case eIncrement	:
+					// 增长ulNotifiedValue值
 					( pxTCB->ulNotifiedValue )++;
 					break;
 
 				case eSetValueWithOverwrite	:
+					// 直接覆写ulNotifiedValue
 					pxTCB->ulNotifiedValue = ulValue;
 					break;
 
 				case eSetValueWithoutOverwrite :
+					// 只有当接收该通知的任务已经读取通知值后才覆写ulNotifiedValue
 					if( ucOriginalNotifyState != taskNOTIFICATION_RECEIVED )
 					{
 						pxTCB->ulNotifiedValue = ulValue;
@@ -4905,6 +4944,7 @@ TickType_t uxReturn;
 				case eNoAction:
 					/* The task is being notified without its notify value being
 					updated. */
+					// 不对ulNotifiedValue做任何操作
 					break;
 
 				default:
@@ -4920,6 +4960,7 @@ TickType_t uxReturn;
 
 			/* If the task is in the blocked state specifically to wait for a
 			notification then unblock it now. */
+			// 如果通知要给的任务正在等待一个任务通知，解除任务阻塞（其被挂在任务延时链表中实现），将其置入就绪链表中
 			if( ucOriginalNotifyState == taskWAITING_NOTIFICATION )
 			{
 				( void ) uxListRemove( &( pxTCB->xStateListItem ) );
@@ -4944,6 +4985,7 @@ TickType_t uxReturn;
 				}
 				#endif
 
+				// 如果通知的任务优先级比当前任务高，进行一次任务切换触发
 				if( pxTCB->uxPriority > pxCurrentTCB->uxPriority )
 				{
 					/* The notified task has a priority above the currently
@@ -5185,7 +5227,7 @@ TickType_t uxReturn;
 /*-----------------------------------------------------------*/
 
 #if( configUSE_TASK_NOTIFICATIONS == 1 )
-
+	// 清空任务的接收状态
 	BaseType_t xTaskNotifyStateClear( TaskHandle_t xTask )
 	{
 	TCB_t *pxTCB;
@@ -5285,7 +5327,7 @@ const TickType_t xConstTickCount = xTickCount;
 			{
 				/* The wake time has not overflowed, so the current block list
 				is used. */
-				// 如果发生溢出，把任务放到当前延时任务链表中
+				// 如果未发生溢出，把任务放到当前延时任务链表中
 				vListInsert( pxDelayedTaskList, &( pxCurrentTCB->xStateListItem ) );
 
 				/* If the task entering the blocked state was placed at the

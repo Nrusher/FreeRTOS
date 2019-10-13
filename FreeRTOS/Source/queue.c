@@ -66,7 +66,9 @@ being used for. */
 
 typedef struct QueuePointers
 {
+	// 指向队列的尾部，指向的单元必须是未被使用的，分配空间时，需要比实际可用的空间多一个字节
 	int8_t *pcTail;					/*< Points to the byte at the end of the queue storage area.  Once more byte is allocated than necessary to store the queue items, this is used as a marker. */
+	// 指向队列上次被读的项
 	int8_t *pcReadFrom;				/*< Points to the last place that a queued item was read from when the structure is used as a queue. */
 } QueuePointers_t;
 
@@ -96,7 +98,9 @@ zero. */
  */
 typedef struct QueueDefinition 		/* The old naming convention is used to prevent breaking kernel aware debuggers. */
 {
+	// 指向队列储存的头部地址
 	int8_t *pcHead;					/*< Points to the beginning of the queue storage area. */
+	// 指向队列储存的下一个空闲区
 	int8_t *pcWriteTo;				/*< Points to the free next place in the storage area. */
 
 	union
@@ -105,6 +109,7 @@ typedef struct QueueDefinition 		/* The old naming convention is used to prevent
 		SemaphoreData_t xSemaphore; /*< Data required exclusively when this structure is used as a semaphore. */
 	} u;
 
+	// 也是通过链表来实现写入和接收的阻塞
 	List_t xTasksWaitingToSend;		/*< List of tasks that are blocked waiting to post onto this queue.  Stored in priority order. */
 	List_t xTasksWaitingToReceive;	/*< List of tasks that are blocked waiting to read from this queue.  Stored in priority order. */
 
@@ -260,10 +265,15 @@ Queue_t * const pxQueue = xQueue;
 
 	taskENTER_CRITICAL();
 	{
+		// 这是一个循环队列，将队列尾指针指向队列的最后一个字节（使用这个字节做标志，判断队列状态）
 		pxQueue->u.xQueue.pcTail = pxQueue->pcHead + ( pxQueue->uxLength * pxQueue->uxItemSize ); /*lint !e9016 Pointer arithmetic allowed on char types, especially when it assists conveying intent. */
+		// 初始的消息数为零，也就是队列中包含的项的个数
 		pxQueue->uxMessagesWaiting = ( UBaseType_t ) 0U;
+		// 写入的位置，从头部写入
 		pxQueue->pcWriteTo = pxQueue->pcHead;
+		// 读取的位置，从尾部读取
 		pxQueue->u.xQueue.pcReadFrom = pxQueue->pcHead + ( ( pxQueue->uxLength - 1U ) * pxQueue->uxItemSize ); /*lint !e9016 Pointer arithmetic allowed on char types, especially when it assists conveying intent. */
+		// 接收发送锁都是打开的
 		pxQueue->cRxLock = queueUNLOCKED;
 		pxQueue->cTxLock = queueUNLOCKED;
 
@@ -293,6 +303,7 @@ Queue_t * const pxQueue = xQueue;
 		else
 		{
 			/* Ensure the event queues start in the correct state. */
+			// 如果是新创建的队列，初始化队列事件链表
 			vListInitialise( &( pxQueue->xTasksWaitingToSend ) );
 			vListInitialise( &( pxQueue->xTasksWaitingToReceive ) );
 		}
@@ -373,6 +384,7 @@ Queue_t * const pxQueue = xQueue;
 
 		configASSERT( uxQueueLength > ( UBaseType_t ) 0 );
 
+		// 计算需要的储存空间（这里为什么判断，直接相乘也是0）
 		if( uxItemSize == ( UBaseType_t ) 0 )
 		{
 			/* There is not going to be a queue storage area. */
@@ -385,6 +397,7 @@ Queue_t * const pxQueue = xQueue;
 			xQueueSizeInBytes = ( size_t ) ( uxQueueLength * uxItemSize ); /*lint !e961 MISRA exception as the casts are only redundant for some ports. */
 		}
 
+		// 分配储存空间
 		/* Allocate the queue and storage area.  Justification for MISRA
 		deviation as follows:  pvPortMalloc() always ensures returned memory
 		blocks are aligned per the requirements of the MCU stack.  In this case
@@ -396,10 +409,12 @@ Queue_t * const pxQueue = xQueue;
 		two bytes). */
 		pxNewQueue = ( Queue_t * ) pvPortMalloc( sizeof( Queue_t ) + xQueueSizeInBytes ); /*lint !e9087 !e9079 see comment above. */
 
+		// 检查是否分配成功
 		if( pxNewQueue != NULL )
 		{
 			/* Jump past the queue structure to find the location of the queue
 			storage area. */
+			// 计算存储区起始位置
 			pucQueueStorage = ( uint8_t * ) pxNewQueue;
 			pucQueueStorage += sizeof( Queue_t ); /*lint !e9016 Pointer arithmetic allowed on char types, especially when it assists conveying intent. */
 
@@ -412,6 +427,7 @@ Queue_t * const pxQueue = xQueue;
 			}
 			#endif /* configSUPPORT_STATIC_ALLOCATION */
 
+			// 初始化队列
 			prvInitialiseNewQueue( uxQueueLength, uxItemSize, pucQueueStorage, ucQueueType, pxNewQueue );
 		}
 		else
@@ -438,16 +454,19 @@ static void prvInitialiseNewQueue( const UBaseType_t uxQueueLength, const UBaseT
 		be set to NULL because NULL is used as a key to say the queue is used as
 		a mutex.  Therefore just set pcHead to point to the queue as a benign
 		value that is known to be within the memory map. */
+		// WAIT:互斥锁相关暂时不管
 		pxNewQueue->pcHead = ( int8_t * ) pxNewQueue;
 	}
 	else
 	{
 		/* Set the head to the start of the queue storage area. */
+		// 把队列的头指针放到存储区首
 		pxNewQueue->pcHead = ( int8_t * ) pucQueueStorage;
 	}
 
 	/* Initialise the queue members as described where the queue type is
 	defined. */
+	// 初始化成员变量
 	pxNewQueue->uxLength = uxQueueLength;
 	pxNewQueue->uxItemSize = uxItemSize;
 	( void ) xQueueGenericReset( pxNewQueue, pdTRUE );
@@ -457,7 +476,8 @@ static void prvInitialiseNewQueue( const UBaseType_t uxQueueLength, const UBaseT
 		pxNewQueue->ucQueueType = ucQueueType;
 	}
 	#endif /* configUSE_TRACE_FACILITY */
-
+	
+	// WAIT: 队列集合，暂时不管
 	#if( configUSE_QUEUE_SETS == 1 )
 	{
 		pxNewQueue->pxQueueSetContainer = NULL;
@@ -771,6 +791,7 @@ Queue_t * const pxQueue = xQueue;
 			highest priority task wanting to access the queue.  If the head item
 			in the queue is to be overwritten then it does not matter if the
 			queue is full. */
+			// 当队列不满或者使用覆盖式的入队方式才真正进行入队操作
 			if( ( pxQueue->uxMessagesWaiting < pxQueue->uxLength ) || ( xCopyPosition == queueOVERWRITE ) )
 			{
 				traceQUEUE_SEND( pxQueue );
@@ -876,6 +897,9 @@ Queue_t * const pxQueue = xQueue;
 			}
 			else
 			{
+				// 队列满了，且没有使用覆盖式入队方式
+
+
 				if( xTicksToWait == ( TickType_t ) 0 )
 				{
 					/* The queue was full and no block time is specified (or
@@ -885,12 +909,14 @@ Queue_t * const pxQueue = xQueue;
 					/* Return to the original privilege level before exiting
 					the function. */
 					traceQUEUE_SEND_FAILED( pxQueue );
+					// 等待时间为0，立刻返回队列满
 					return errQUEUE_FULL;
 				}
 				else if( xEntryTimeSet == pdFALSE )
 				{
 					/* The queue was full and a block time was specified so
 					configure the timeout structure. */
+					// 队列满，且还没有阻塞，填充超时结构体，在面后面加入等待入队事件阻塞链表
 					vTaskInternalSetTimeOutState( &xTimeOut );
 					xEntryTimeSet = pdTRUE;
 				}

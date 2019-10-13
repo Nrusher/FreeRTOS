@@ -83,6 +83,7 @@ typedef unsigned long UBaseType_t;
 #define portYIELD()																\
 {																				\
 	/* Set a PendSV to request a context switch. */								\
+	// 直接触发PendSV中断进行任务切换
 	portNVIC_INT_CTRL_REG = portNVIC_PENDSVSET_BIT;								\
 																				\
 	/* Barriers are normally not required but do ensure the code is completely	\
